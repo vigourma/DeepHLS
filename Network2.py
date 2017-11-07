@@ -1,30 +1,16 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Oct 16 22:50:30 2017
-
-@author: vigou
-"""
 import random
 import numpy as np
 import mnist
-
-
+import time
+import pickle 
 
 
 class Network(object):
 
     def __init__(self, sizes, epochs, mini_batch_size, eta):
-        """The list ``sizes`` contains the number of neurons in the
-        respective layers of the network.  For example, if the list
-        was [2, 3, 1] then it would be a three-layer network, with the
-        first layer containing 2 neurons, the second layer 3 neurons,
-        and the third layer 1 neuron.  The biases and weights for the
-        network are initialized randomly, using a Gaussian
-        distribution with mean 0, and variance 1.  Note that the first
-        layer is assumed to be an input layer, and by convention we
-        won't set any biases for those neurons, since biases are only
-        ever used in computing the outputs from later layers."""
         #hyperparameters (to optimize ---> best 96.2) nn = Network([784,60,10], 20, 5, 3.0)
+        # nn = Network([784,100,10], 100, 10, 3.0)  -->96.59 %
+        # nn = Network([784,150,10], 150, 10, 3.0)  -->97%
         self.num_layers = len(sizes) #number of layers
         
         self.sizes = sizes #[number of input pixels, number of neuron, number of digit]
@@ -41,9 +27,17 @@ class Network(object):
         self.eta = eta #learning rate for the gradient descent optimization
         
         
+        #instrumentation
+        self.training_time = 0 #number of epochs done
+        #time of calculation (removed to improve time calculation)
+        self.Tfeedforward = [0]
+        self.Tbackforward = [0]
+        self.Tthird = [0]
+        self.TminiBatchCreation =[0]
+        
+        
         
     def feedforward(self, a):
-        """Return the output of the network if ``a`` is input."""
         for b, w in zip(self.biases, self.weights):
             a = sigmoid(np.dot(w, a)+b)
         return a
@@ -53,41 +47,39 @@ class Network(object):
         
         
     def backprop(self, x, y):
-        """Return a tuple ``(nabla_b, nabla_w)`` representing the
-        gradient for the cost function C_x.  ``nabla_b`` and
-        ``nabla_w`` are layer-by-layer lists of numpy arrays, similar
-        to ``self.biases`` and ``self.weights``."""
+        #initialization of vectors
         nabla_b = [np.zeros(b.shape) for b in self.biases]
         nabla_w = [np.zeros(w.shape) for w in self.weights]
                    
         # feedforward
+        #t0 = time.time()
         activation = x
         activations = [x] # list to store all the activations, layer by layer
         zs = [] # list to store all the z vectors, layer by layer
         for b, w in zip(self.biases, self.weights):
             z = np.dot(w, activation)+b
-            zs.append(z)
-            activation = sigmoid(z)
-            activations.append(activation)
+            zs.append(z) #store all q vectors
+            activation = sigmoid(z) 
+            activations.append(activation) #store all Q vectors
+        #t1 = time.time()-t0
+        #self.Tfeedforward.append(t1)
             
         # backward pass
-        delta = self.cost_derivative(activations[-1], y) * \
-            sigmoid_prime(zs[-1])
-        nabla_b[-1] = delta
-        nabla_w[-1] = np.dot(delta, activations[-2].transpose())
-        # Note that the variable l in the loop below is used a little
-        # differently to the notation in Chapter 2 of the book.  Here,
-        # l = 1 means the last layer of neurons, l = 2 is the
-        # second-last layer, and so on.  It's a renumbering of the
-        # scheme in the book, used here to take advantage of the fact
-        # that Python can use negative indices in lists.
-        for l in range(2, self.num_layers):
-            z = zs[-l]
+        #t0 = time.time()
+        delta = self.cost_derivative(activations[-1], y) * sigmoid_prime(zs[-1]) #calculation of delta1
+        nabla_b[-1] = delta #delta nablaB 1
+        nabla_w[-1] = np.dot(delta, activations[-2].transpose()) #delta nablaW 1
+
+        #loop for only 1 time but can be used to extend to add more layers
+        for i in range(2, self.num_layers):
+            z = zs[-i]
             sp = sigmoid_prime(z)
-            delta = np.dot(self.weights[-l+1].transpose(), delta) * sp
-            nabla_b[-l] = delta
-            nabla_w[-l] = np.dot(delta, activations[-l-1].transpose())
-        return (nabla_b, nabla_w)        
+            delta = np.dot(self.weights[-i+1].transpose(), delta) * sp #calculation of delta0
+            nabla_b[-i] = delta #delta nablaB 0
+            nabla_w[-i] = np.dot(delta, activations[-i-1].transpose()) #delta nablaW 0
+        #t1 = time.time()-t0
+        #self.Tbackforward.append(t1)
+        return (nabla_b, nabla_w)   #size 2 and 2     
 
 
 
@@ -95,61 +87,47 @@ class Network(object):
 
         
     def update_mini_batch(self, mini_batch, eta):
-        """Update the network's weights and biases by applying
-        gradient descent using backpropagation to a single mini batch.
-        The ``mini_batch`` is a list of tuples ``(x, y)``, and ``eta``
-        is the learning rate."""
+        #initialisation of vectors
         nabla_b = [np.zeros(b.shape) for b in self.biases]
         nabla_w = [np.zeros(w.shape) for w in self.weights]
+        #calculation of nablaB and nablaW
         for x, y in mini_batch:
-            delta_nabla_b, delta_nabla_w = self.backprop(x, y)
-            nabla_b = [nb+dnb for nb, dnb in zip(nabla_b, delta_nabla_b)]
-            nabla_w = [nw+dnw for nw, dnw in zip(nabla_w, delta_nabla_w)]
-        self.weights = [w-(eta/len(mini_batch))*nw
-                        for w, nw in zip(self.weights, nabla_w)]
-        self.biases = [b-(eta/len(mini_batch))*nb
-                       for b, nb in zip(self.biases, nabla_b)]    
-
+            delta_nabla_b, delta_nabla_w = self.backprop(x, y) 
+            #t0 = time.time()
+            nabla_b = [nb+dnb for nb, dnb in zip(nabla_b, delta_nabla_b)] #size 2 , calculation of nablaB
+            nabla_w = [nw+dnw for nw, dnw in zip(nabla_w, delta_nabla_w)] #size 2 , calculation of nablaW
+            #self.Tthird.append(time.time()-t0)
+        #t0 = time.time()
+        self.weights = [w-(eta/len(mini_batch))*nw for w, nw in zip(self.weights, nabla_w)] #update of coef of W
+        self.biases = [b-(eta/len(mini_batch))*nb for b, nb in zip(self.biases, nabla_b)] #up^date of coef of B
+        #self.Tthird.append(time.time()-t0)   
+        
 
 
 
 
     
-    def SGD(self, training_data, test_data=None):
-        """Train the neural network using mini-batch stochastic
-        gradient descent.  The ``training_data`` is a list of tuples
-        ``(x, y)`` representing the training inputs and the desired
-        outputs.  The other non-optional parameters are
-        self-explanatory.  If ``test_data`` is provided then the
-        network will be evaluated against the test data after each
-        epoch, and partial progress printed out.  This is useful for
-        tracking progress, but slows things down substantially."""
-        if test_data: n_test = len(test_data)
+    def SGD(self, training_data):
         n = len(training_data)
+        #loop on the number of training to do
         for j in range(self.epochs):
-            random.shuffle(training_data)
-            mini_batches = [
-                training_data[k : k+ self.mini_batch_size]
-                for k in range(0, n, self.mini_batch_size)]
+            #t0 = time.time()
+            self.training_time += 1 
+            random.shuffle(training_data) #randomize learning 
+            mini_batches = [ training_data[k : k+ self.mini_batch_size] for k in range(0, n, self.mini_batch_size)] #create mini batches
+            #self.TminiBatchCreation.append(time.time()-t0)
             for mini_batch in mini_batches:
-                self.update_mini_batch(mini_batch, self.eta)
-            if test_data:
-                print ("Epoch {0}: {1} / {2}".format(
-                    j, self.evaluate(test_data), n_test))
-            else:
-                print ("Epoch {0} complete".format(j))
+                self.update_mini_batch(mini_batch, self.eta) #learning on each mini batch
+
 
                 
                 
         
         
-    def evaluate(self, test_data):
-        """Return the number of test inputs for which the neural
-        network outputs the correct result. Note that the neural
-        network's output is assumed to be the index of whichever
-        neuron in the final layer has the highest activation."""
+    def evaluate(self, data_to_test):
+        #check the result on each couple used for test and return % of correct answer
         test_results = [(np.argmax(self.feedforward(x)), y)
-                        for (x, y) in test_data]
+                        for (x, y) in data_to_test]
         return sum(int(x == y) for (x, y) in test_results)
 
         
@@ -157,8 +135,7 @@ class Network(object):
               
         
     def cost_derivative(self, output_activations, y):
-        """Return the vector of partial derivatives \partial C_x /
-        \partial a for the output activations."""
+        #cost function used
         return (output_activations-y)
 
         
@@ -166,27 +143,74 @@ class Network(object):
         
         
 #### Miscellaneous functions
-def sigmoid(z):
+def sigmoid(x):
     """The sigmoid function."""
-    return 1.0/(1.0+np.exp(-z))
+    return 1.0/(1.0+np.exp(-x))    
+    
+def sigmoid_prime(x):
+    """Derivative of the sigmoid function."""
+    return sigmoid(x)*(1-sigmoid(x))
+ 
+    
+def ReLU(x):
+    return x * (x > 0)
+
+def ReLU_prime(x):
+    return 1. * (x > 0)    
+    
 
     
     
     
-def sigmoid_prime(z):
-    """Derivative of the sigmoid function."""
-    return sigmoid(z)*(1-sigmoid(z))
- 
+#saving network   
+def save_object(obj, filename):
+    with open(filename, 'wb') as output:
+        pickle.dump(obj, output, pickle.HIGHEST_PROTOCOL)  
+        
+        
+        
+        
+        
+# function to select depending of objective        
+def verbose_time_calculation_repartition():
+    print ("--------------- Loading data ---------------")
+    t0 = time.time()
+    training_data, validation_data, test_data = mnist.load_data()
+    print ("--------------- Data loaded ---------------")
+    Tload = (time.time()-t0)
+    print("Time to load picture : " , Tload)
     
+    nn = Network([784,60,10], 20, 5, 3.0)
+    print ("--------------- Training ---------------")
+    t0 = time.time()
+    nn.SGD(training_data)
+    Ttrain = (time.time()-t0)
+    print ("--------------- Trained ---------------")
+    print("Time to train model : " , Ttrain)
     
-    
+    t0 = time.time()
+    print ("Neural Network accuracy on test data is {} %".format(nn.evaluate(test_data) / 100.00))
+    Ttest = (time.time()-t0)
+    print("Time to test : " , Ttest)
+    print("----------------- More Info --------------")
+    print ("Time in feedforward for training", np.sum(nn.Tfeedforward))
+    print ("Time in backforward for training", np.sum(nn.Tbackforward))
+    print ("Time in third part  for training", np.sum(nn.Tthird))
+    print ("Time to create minibatches " , np.sum(nn.TminiBatchCreation))
+    print ("----------------- Repartition -----------")
+    print ("Tfeedforward : ", np.sum(nn.Tfeedforward) / Ttrain * 100, "%")
+    print ("Tbackforward : ", np.sum(nn.Tbackforward) / Ttrain * 100, "%")
+    print ("Tthird : ", np.sum(nn.Tthird) / Ttrain * 100, "%")
+    print ("TminiBatchCreation : ", np.sum(nn.TminiBatchCreation) / Ttrain * 100, "%")
+    print ("--------------------- THE END -----------------")    
     
 if __name__ == '__main__':
     print ("--------------- Loading data ---------------")
     training_data, validation_data, test_data = mnist.load_data()
     print ("--------------- Data loaded ---------------")
-    nn = Network([784,30,10], 10, 10, 3.0)
+    nn = Network([784,60,10], 20, 5, 3.0)
     print ("--------------- Training ---------------")
     nn.SGD(training_data)
-    
+    print ("--------------- Trained ---------------")
     print ("Neural Network accuracy on test data is {} %".format(nn.evaluate(test_data) / 100.00))
+    print ("--------------------- THE END -----------------")
