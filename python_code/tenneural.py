@@ -1,9 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-Created on Tue Nov 28 20:04:56 2017
-
-@author: vigou
-"""
 import time
 import tensorflow as tf
 import numpy as np
